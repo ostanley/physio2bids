@@ -1,6 +1,6 @@
 ### Physio2bids
 
-This python script was created to cconvert data from the Siemens 7T Magnetom to BIDS format. I rquires a directory of physio files (\*.puls and \*.resp). 
+This python script was created to cconvert data from the Siemens 7T Magnetom to BIDS format. It requires a directory of physio files (\*.puls and \*.resp) and a BIDS directory. 
 
 ## Usage
 
