@@ -6,6 +6,7 @@ import json
 import csv
 import gzip
 import argparse
+import fnmatch
 
 def convert_time(acqtime):
     # convert hours-minutes-seconds.mikliseconds format to ms
@@ -25,7 +26,7 @@ def read_physio_7T(fbase, ext):
             scaninfo = re.search('5002(.*)6002', l).group(1)
             samprate = float(re.search('_SAMPLES_PER_SECOND = ([1-9][0-9]*)', scaninfo).group(1))
             physio = re.search('6002 (.*)5002', l).group(1).split(' ')
-            physio = [v for v in physio if v != '5000' or v != '6000']
+            physio = [v for v in physio if v != '5000' and v != '6000']
         if 'MPCUTime' in l:
             ls = l.split()
             if 'LogStart' in l:
@@ -54,22 +55,33 @@ def write_physio_to_bids(physio_dir,bids_dir):
         else:
             acqtimes[acqtime].append(f)
             endtimes[acqtime].append(convert_time(l.get_metadata(f)['time']['samples']['AcquisitionTime'][0]))
-        if l.get_metadata(f)['MagneticFieldStrength']!=6.98:
+        if l.get_metadata(f)['MagneticFieldStrength']!=6.98 and l.get_metadata(f)['Manufacturer']!="Siemens":
             print("Scanners other than the Siemens 7T are not currently supported")
             raise(NameError)
     # read in physio files and match based on acqtime time and date
     # to functional data
-    files = set([f[0:-4] for f in os.listdir(physio_dir) if '.puls' in f])
+    matches =[]
+    for root, dirnames, filenames in os.walk(physio_dir):
+        for filename in filenames:
+            if '.puls' in filename:
+                matches.append(os.path.join(root, filename))
+    files = set([f[0:-4] for f in matches])
     for f in files:
-        ctime, csf, cardiac = read_physio_7T(physio_dir + f, 'puls')
-        rtime, rsf, respiratory = read_physio_7T(physio_dir + f, 'resp')
-        acqmatches = [fname for key, fname in acqtimes.items() if key-ctime[0]>0 and ctime[1]-endtimes[key][0]>0]
+        try:
+            ctime, csf, cardiac = read_physio_7T(f, 'puls')
+            rtime, rsf, respiratory = read_physio_7T(f, 'resp')
+        except:
+            print('Reading file failed: ' + f)
+
+        # matched based on files that start before and end after a functional run
+        acqmatches = [fname for acqtime, fname in acqtimes.items() if acqtime-ctime[0]>0 and ctime[1]-endtimes[acqtime][0]>0]
         if len(acqmatches)>0:
             for image in acqmatches[0]:
                 # if matched find the difference between the MDHTime and the Acquisition time as start time
                 # https://cfn.upenn.edu/aguirre/wiki/public:pulse-oximetry_during_fmri_scanning
                 imtime = convert_time(l.get_metadata(image)['time']['samples']['AcquisitionTime'][0])
                 filematches = create_filebase(image)
+                print((ctime[0] - imtime)*csf/1000)
                 cardiac_json = {'SamplingFrequency':csf,
                                 'StartTime':(ctime[0] - imtime)/1000.0,
                                 'Columns':["cardiac"]}
