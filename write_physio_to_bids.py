@@ -10,11 +10,11 @@ import fnmatch
 
 def convert_time(acqtime):
     # convert hours-minutes-seconds.mikliseconds format to ms
-    return int(ceil(1000*((float(acqtime[0:2])*60 + \
-        float(acqtime[2:4]))*60 + float(acqtime[4:]))))
+    print(acqtime)
+    return (int(ceil(1000*((float(acqtime[0:2])*60 + float(acqtime[3:5]))*60 + float(acqtime[6:8])))) + (float((acqtime[9:-2]))/10))
 
 def create_filebase(boldfile):
-    return re.search('(.*)_bold.ni*', boldfile).group(1)
+    return re.search('(.*)_bold.*', boldfile).group(1)
 
 def read_physio_7T(fbase, ext):
     with open(fbase + ext) as f:
@@ -44,17 +44,19 @@ def read_physio_7T(fbase, ext):
 def write_physio_to_bids(physio_dir,bids_dir):
     # read the acqtimes out of the bids dataset use these to match with the physio files
     l=BIDSLayout(bids_dir)
-    files = l.get(type='bold', return_type='file', extensions='.nii.gz')
+    files = l.get(type='bold', return_type='file', extensions='.json')
+    print(files)
     acqtimes = {}
     endtimes = {}
     for f in files:
-        acqtime=convert_time(l.get_metadata(f)['time']['samples']['AcquisitionTime'][0])
+        print(f)
+        acqtime=convert_time(l.get_metadata(f)['AcquisitionTime'])
         if acqtime not in acqtimes.keys():
             acqtimes[acqtime] = [f]
-            endtimes[acqtime] = [convert_time(l.get_metadata(f)['time']['samples']['AcquisitionTime'][0])]
+            endtimes[acqtime] = [convert_time(l.get_metadata(f)['AcquisitionTime'])]
         else:
             acqtimes[acqtime].append(f)
-            endtimes[acqtime].append(convert_time(l.get_metadata(f)['time']['samples']['AcquisitionTime'][0]))
+            endtimes[acqtime].append(convert_time(l.get_metadata(f)['AcquisitionTime']))
         if l.get_metadata(f)['MagneticFieldStrength']!=6.98 and l.get_metadata(f)['Manufacturer']!="Siemens":
             print("Scanners other than the Siemens 7T are not currently supported")
             raise(NameError)
@@ -74,12 +76,14 @@ def write_physio_to_bids(physio_dir,bids_dir):
             print('Reading file failed: ' + f)
 
         # matched based on files that start before and end after a functional run
-        acqmatches = [fname for acqtime, fname in acqtimes.items() if acqtime-ctime[0]>0 and ctime[1]-endtimes[acqtime][0]>0]
+        acqmatches = [fname for acqtime, fname in acqtimes.items() if acqtime-ctime[0]>0 and ctime[1]-acqtime[0]>0]
         if len(acqmatches)>0:
             for image in acqmatches[0]:
                 # if matched find the difference between the MDHTime and the Acquisition time as start time
                 # https://cfn.upenn.edu/aguirre/wiki/public:pulse-oximetry_during_fmri_scanning
-                imtime = convert_time(l.get_metadata(image)['time']['samples']['AcquisitionTime'][0])
+                imtime = convert_time(l.get_metadata(image)['AcquisitionTime'])
+                print("Imagetime: ",str(imtime))
+                print("LogMDHtime: ",str(ctime[0]), str(ctime[1]))
                 filematches = create_filebase(image)
                 print((ctime[0] - imtime)*csf/1000)
                 cardiac_json = {'SamplingFrequency':csf,
@@ -87,7 +91,7 @@ def write_physio_to_bids(physio_dir,bids_dir):
                                 'Columns':["cardiac"]}
                 with open(filematches + '_recording-cardiac_physio.json', 'w+') as fp:
                     json.dump(cardiac_json, fp)
-                with gzip.open(filematches + '_recording-cardiac_physio.tsv.gz', 'wt+') as tsv:
+                with open(filematches + '_recording-cardiac_physio.tsv', 'wt+') as tsv:
                     writer = csv.writer(tsv, delimiter='\t')
                     for val in cardiac:
                         try:
@@ -99,13 +103,14 @@ def write_physio_to_bids(physio_dir,bids_dir):
                                 'Columns':["respiratory"]}
                 with open(filematches + '_recording-respiratory_physio.json', 'w+') as fp:
                     json.dump(resp_json, fp)
-                with gzip.open(filematches + '_recording-respiratory_physio.tsv', 'wt+') as tsv:
+                with open(filematches + '_recording-respiratory_physio.tsv', 'wt+') as tsv:
                     writer = csv.writer(tsv, delimiter='\t')
                     for val in respiratory:
                         try:
                             writer.writerow([int(val)])
                         except:
                             continue
+
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description='Convert Siemens 7T physio data to BIDS format')
